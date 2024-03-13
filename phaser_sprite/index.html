@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BreakOut Game - Phaser</title>
+    <style>
+        * { padding: 0; margin: 0; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@v3.60.0/dist/phaser.min.js"></script>
+</head>
+<body>
+    <script>
+        const config = {
+            width: 480,
+            height: 320,
+            type: Phaser.AUTO,
+            scale: {
+                mode: Phaser.Scale.FIT,
+                autoCenter: Phaser.Scale.CENTER_BOTH,
+            },
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: { y: 0 }
+                }
+            },
+            backgroundColor: '#eee',
+            antialias: true,
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            }
+        }
+
+        const game = new Phaser.Game(config);
+
+        let ball, paddle, bricks, newBrick, brickInfo, startBtn, veil;
+        let scoreText, livesText, lifeLostText;
+        let score = 0;
+        let lives = 3;
+        let playing = false;
+
+        function preload() {
+            this.load.image('paddle', '../assets/breakout/paddle.png');
+            this.load.image('brick', '../assets/breakout/brick.png');
+            this.load.spritesheet('ball', '../assets/breakout/wobble.png', { frameWidth: 20, frameHeight: 20 });
+            this.load.spritesheet('button', '../assets/breakout/button.png', { frameWidth: 120, frameHeight: 40 });
+        }
+
+        function create() {
+            ball = this.physics.add.sprite(this.cameras.main.width * 0.5, this.cameras.main.height - 25, 'ball')
+                .setOrigin(0.5)
+                .setCollideWorldBounds(true)
+                .setBounce(1);
+            ball.body.setAllowGravity(false);
+            
+            this.anims.create({
+                key: 'wobble',
+                frames: this.anims.generateFrameNumbers('ball', { frames: [0, 1, 0, 2, 0, 1, 0, 2, 0] }),
+                frameRate: 20
+            });
+
+            paddle = this.physics.add.sprite(this.cameras.main.width * 0.5, this.cameras.main.height - 5, 'paddle')
+                .setOrigin(0.5, 1)
+                .setImmovable(true); // 미설정시 ball이 paddle에 닿으면 paddle이 밀려남
+
+            initBricks(this);
+
+            startBtn = this.add.sprite(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5, 'button').setInteractive().setOrigin(0.5).setDepth(2);
+            startBtn.on('pointerover', function() {
+                this.setFrame(1);
+            });
+            startBtn.on('pointerout', function() {
+                this.setFrame(0);
+            });
+            startBtn.on('pointerdown', function() {
+                this.setFrame(2);
+            })
+            startBtn.on('pointerup', startGame, this);
+
+            veil = this.add.graphics(0, 0);
+            veil.fillStyle('0x000000', 0.3).fillRect(0, 0, this.cameras.main.width, this.cameras.main.height).setDepth(1);
+
+            const textStyle = { font: '18px Arial', fill: '#0095dd' };
+            scoreText = this.add.text(5, 5, 'Points: 0', textStyle);
+            livesText = this.add.text(this.cameras.main.width - 5, 5, 'Lives: ' + lives, textStyle);
+            livesText.setOrigin(1, 0);
+            lifeLostText = this.add.text(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5, 'Life lost, tap to continue', textStyle);
+            lifeLostText.setOrigin(0.5);
+            lifeLostText.visible = false;
+
+            this.physics.add.collider(ball, paddle, ballHitPaddle.bind(this), null, this);
+            this.physics.add.collider(ball, bricks, ballHitBrick.bind(this), null, this);
+        }
+
+        function update() {
+            if(playing) {
+                paddle.x = this.input.x || this.cameras.main.width * 0.5; // this.input은 마우스 좌표를 받아 그 움직임에 따라 paddle도 움직이도록 설정, 처음에는 화면 너비 중앙에 위치하도록
+                paddle.x = Phaser.Math.Clamp(paddle.x, paddle.width / 2, this.cameras.main.width - paddle.width / 2); // paddle이 좌우 바깥으로 빠져나가지 않도록
+            }
+
+            if(ball.y >= this.cameras.main.height - ball.height / 2 && !lifeLostText.visible) {
+                ballLeaveScreen.call(this);
+            }
+        }
+
+        function startGame() {
+            veil.setVisible(false);
+            startBtn.destroy();
+            ball.setVelocity(150, -150);
+            playing = true;
+        }
+
+        function initBricks(_this) {
+            brickInfo = {
+                width: 50,
+                height: 20,
+                count: {
+                    row: 3,
+                    col: 7,
+                },
+                offset: {
+                    top: 50,
+                    left: 60,
+                },
+                padding: 10,
+            };
+
+            bricks = _this.physics.add.staticGroup();
+
+            for(let c = 0; c < brickInfo.count.col; c++) {
+                for(let r = 0; r < brickInfo.count.row; r++) {
+                    const brickX = c * (brickInfo.width + brickInfo.padding) + brickInfo.offset.left;
+                    const brickY = r * (brickInfo.height + brickInfo.padding) + brickInfo.offset.top;
+
+                    bricks.create(brickX, brickY, 'brick').refreshBody();
+                }
+            }
+        }
+
+        function ballHitBrick(ball, brick) {
+            this.tweens.add({
+                targets: brick,
+                scaleX: 0,
+                scaleY: 0,
+                duration: 200,
+                ease: 'Linear',
+                onComplete: function() {
+                    brick.disableBody(true, true); // physics body에서 사용됨, 메모리/씬에 남아있음. cf) destroy는 완전 제거
+                }
+            });
+
+            score += 10;
+            scoreText.setText(`Points: ${score}`);
+
+            let count_alive = bricks.countActive() - 1;
+            if(count_alive === 0) {
+                alert("You won the game, congratulations!");
+                this.scene.restart();
+            }
+        }
+
+        function ballLeaveScreen() {
+            lives--;
+            livesText.setText('Lives: ' + lives);
+
+            if(lives > 0) {
+                lifeLostText.visible = true;
+                ball.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height - 25).setVelocity(0, 0);
+                paddle.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height - 5);
+                playing = false;
+                
+                this.input.once('pointerdown', function() {
+                    playing = true;
+                    lifeLostText.setVisible(false);
+                    ball.setVelocity(150, -150);
+                });
+            } else {
+                alert('You lost, game over!');
+                this.scene.restart();
+            }
+        }
+
+        function ballHitPaddle() {
+            ball.play('wobble');
+            ball.setVelocity(-5 * (paddle.x - ball.x), -150);
+            ball.on('animationcomplete', function() {
+                ball.anims.stop();
+            }, this);
+        }
+    </script>
+</body>
+</html>
