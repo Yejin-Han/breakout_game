@@ -72,7 +72,7 @@
                 guideText.setFontStyle('bold italic');
             });
             guideBtn.on('pointerup', () => {
-                if(currentLevel === 1) {
+                if(currentLevel === 1 && lives === 5) {
                     startGame();
                 }
             });
@@ -244,24 +244,26 @@
         }
 
         function ballLeaveScreen() {
-            lives--;
-            livesText.setText('Lives: ' + lives);
+            if(playing) {
+                lives--;
+                livesText.setText('Lives: ' + lives);
 
-            if(lives > 0) {
-                lifeLostText.visible = true;
-                veil.setVisible(true);
-                playing = false;
-                resetBall.call(this);
-                ball.setVelocity(0);
-                
-                this.input.once('pointerdown', function() {
-                    playing = true;
-                    lifeLostText.setVisible(false);
-                    veil.setVisible(false);
-                    ball.setVelocity(-75, -300);
-                });
-            } else {
-                endGame.call(this);
+                if(lives > 0) {
+                    lifeLostText.visible = true;
+                    veil.setVisible(true);
+                    playing = false;
+                    resetBall.call(this);
+                    ball.setVelocity(0);
+                    
+                    this.input.once('pointerdown', function() {
+                        playing = true;
+                        lifeLostText.setVisible(false);
+                        veil.setVisible(false);
+                        ball.setVelocity(-75, -300);
+                    });
+                } else {
+                    endGame.call(this);
+                }
             }
         }
 
@@ -323,21 +325,19 @@
             guideBtn.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.6).setDepth(6);
             guideText.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.6).setText('RESTART').setDepth(7);
 
-            this.tweens.add({
-                targets: resultContainer,
-                y: 0,
-                alpha: 1,
-                duration: 1000,
-                ease: 'Sine.easeInOut',
-                onComplete: () => {
-                    if(currentLevel === 3) {
+            if(lives > 0) {
+                this.tweens.add({
+                    targets: resultContainer,
+                    y: 0,
+                    alpha: 1,
+                    duration: 1000,
+                    ease: 'Sine.easeInOut',
+                    onComplete: () => {
                         // 게임 클리어, score counter
                         let finalScore = score;
                         let scoreObject = { value: 0 };
 
-                        if(lives > 1) {
-                            finalScore += (lives - 1) * 20;
-                        }
+                        finalScore += (lives - 1) * 20;
 
                         this.tweens.add({
                             targets: scoreObject,
@@ -355,26 +355,34 @@
                                 });
                             }
                         });
-                    } else {
-                        resultText1.setVisible(false);
-                        resultText2.setVisible(false);
-                        this.tweens.add({
-                            targets: gameOverText,
-                            y: this.cameras.main.height * 0.4,
-                            alpha: 1,
-                            duration: 1000,
-                            ease: 'Sine.easeInOut',
-                            onComplete: () => {
-                                guideBtn.setVisible(true);
-                                guideText.setVisible(true);
-                                guideBtn.once('pointerup', () => {
-                                    initializeGame.call(this);
-                                });
-                            }
-                        })
                     }
-                }
-            });
+                }); 
+            } else {
+                console.log(this);
+                resultText1.setVisible(false);
+                resultText2.setVisible(false);
+                this.tweens.add({
+                    targets: resultContainer,
+                    y: 0,
+                    alpha: 1,
+                    duration: 1000,
+                    ease: 'Sine.easeInOut',
+                });
+                this.tweens.add({
+                    targets: gameOverText,
+                    y: this.cameras.main.height * 0.4,
+                    alpha: 1,
+                    duration: 1000,
+                    ease: 'Sine.easeInOut',
+                    onComplete: () => {
+                        guideBtn.setVisible(true);
+                        guideText.setVisible(true);
+                        guideBtn.once('pointerup', () => {
+                            initializeGame.call(this);
+                        });
+                    }
+                });
+            }
         }
 
         function initializeGame() {
@@ -389,6 +397,7 @@
             levelText.setText('Level ' + currentLevel);
             resultText1.setVisible(true);
             resultText2.setText('0').setVisible(true);
+            gameOverText.setAlpha(0);
             guideBtn.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5).setDepth(2);
             guideText.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5).setText('START').setDepth(3);
             veil.setAlpha(0.38);
