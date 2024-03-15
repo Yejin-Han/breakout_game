@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BreakOut Game - Phaser</title>
+    <style>
+        * { padding: 0; margin: 0; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@v3.60.0/dist/phaser.min.js"></script>
+</head>
+<body>
+    <script>
+        const config = {
+            width: 800,
+            height: 600,
+            type: Phaser.WEBGL,
+            scale: {
+                mode: Phaser.Scale.FIT,
+                autoCenter: Phaser.Scale.CENTER_BOTH,
+            },
+            physics: {
+                default: 'arcade'
+            },
+            backgroundColor: '#0a0a0a',
+            antialias: true,
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            }
+        }
+
+        const game = new Phaser.Game(config);
+
+        let ball, paddle, bricks, newBrick, brickInfo, guideBtn, veil, resultContainer, resultGraphics;
+        let scoreText, levelText, livesText, lifeLostText, guideText, resultText1, resultText2, gameOverText;
+        let score = 0;
+        let lives = 5;
+        let playing = false;
+        let currentLevel = 1;
+
+        function preload() {
+            this.load.atlas('assets', './assets/breakout/breakout.png', './assets/breakout/breakout.json');
+        }
+
+        function create() {
+            // 바닥 말고 충돌 가능
+            this.physics.world.setBoundsCollision(true, true, true, false); // left, right, up, down
+
+            ball = this.physics.add.image(this.cameras.main.width * 0.5, this.cameras.main.height - 100, 'assets', 'ball1')
+                .setOrigin(0.5)
+                .setCollideWorldBounds(true)
+                .setBounce(1);
+
+            paddle = this.physics.add.image(this.cameras.main.width * 0.5, this.cameras.main.height - 50, 'assets', 'paddle1')
+                .setOrigin(0.5, 1)
+                .setImmovable();
+
+            createBricks.call(this);
+            
+            this.physics.add.collider(ball, paddle, ballHitPaddle.bind(this), null, this);
+
+            guideBtn = this.add.image(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5, 'assets', 'button').setInteractive({cursor: 'pointer'}).setOrigin(0.5).setDepth(2);
+            guideBtn.on('pointerover', function() {
+                this.setTexture('assets', 'buttonOver');
+            });
+            guideBtn.on('pointerout', function() {
+                this.setTexture('assets', 'button');
+            });
+            guideBtn.on('pointerdown', function() {
+                guideText.setFontStyle('bold italic');
+            });
+            guideBtn.on('pointerup', () => {
+                if(currentLevel === 1) {
+                    startGame();
+                }
+            });
+
+            veil = this.add.graphics(0, 0);
+            veil.fillStyle('0x000000', 0.5).fillRect(0, 0, this.cameras.main.width, this.cameras.main.height).setDepth(1);
+
+            resultContainer = this.add.container(0, 0).setDepth(5).setAlpha(0);
+            resultContainer.y = 50;
+
+            resultGraphics = this.add.graphics(0, 0);
+            resultGraphics.fillStyle('0xffffff', 1).fillRoundedRect(150, 112.5, 500, 375);
+            resultGraphics.lineStyle(3, '0x107dab').strokeRoundedRect(150, 112.5, 500, 375);
+            resultContainer.add(resultGraphics);
+
+            const textStyle = { font: '20px Arial', fill: '#ffffff' };
+            const textStyle2 = { font: 'bold 28px Arial', fill: '#000' };
+            const textStyle3 = { font: 'bold 42px Arial', fill: '#000' };
+
+            scoreText = this.add.text(5, 8, 'Points: 0', textStyle);
+
+            levelText = this.add.text(this.cameras.main.width * 0.5, 8, 'Level ' + currentLevel, textStyle);
+            levelText.setOrigin(0.5, 0).setFontSize('24px');
+
+            livesText = this.add.text(this.cameras.main.width - 5, 8, 'Lives: ' + lives, textStyle);
+            livesText.setOrigin(1, 0);
+
+            lifeLostText = this.add.text(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5, 'Life lost, tap to continue...', textStyle);
+            lifeLostText.setFontSize('24px').setOrigin(0.5).setDepth(2);
+            lifeLostText.visible = false;
+
+            guideText = this.add.text(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5, 'START', textStyle2);
+            guideText.setOrigin(0.5).setDepth(3);
+
+            resultText1 = this.add.text(this.cameras.main.width * 0.5 - 60, this.cameras.main.height * 0.4, 'Score: ', textStyle3);
+            resultText1.setOrigin(0.5);
+            resultText2 = this.add.text(this.cameras.main.width * 0.5 + 30, this.cameras.main.height * 0.4, '0', textStyle3);
+            resultText2.setOrigin(0, 0.5);
+            resultContainer.add(resultText1);
+            resultContainer.add(resultText2);
+
+            gameOverText = this.add.text(this.cameras.main.width * 0.5, this.cameras.main.height * 0.4 + 20, 'GAME OVER', textStyle2);
+            gameOverText.setOrigin(0.5).setAlpha(0);
+            resultContainer.add(gameOverText);
+        }
+
+        function update() {
+            // 패들 마우스 움직임
+            if(playing) {
+                paddle.x = this.input.x || this.cameras.main.width * 0.5; // this.input은 마우스 좌표를 받아 그 움직임에 따라 paddle도 움직이도록 설정, 처음에는 화면 너비 중앙에 위치하도록
+                paddle.x = Phaser.Math.Clamp(paddle.x, paddle.width / 2, this.cameras.main.width - paddle.width / 2); // paddle이 좌우 바깥으로 빠져나가지 않도록
+            }
+
+            // 바닥에 닿았을 때
+            if(ball.y > this.cameras.main.height - ball.height / 2 && !lifeLostText.visible) {
+                ballLeaveScreen.call(this);
+            }
+        }
+
+        function startGame() {
+            veil.setVisible(false);
+            guideText.setVisible(false);
+            guideBtn.setVisible(false);
+            ball.setVelocity(-75, -300);
+            playing = true;
+        }
+
+        function createBricks() {
+            if(bricks) {
+                bricks.clear(true, true);
+            }
+
+            if(currentLevel === 1) {
+                bricks = this.physics.add.staticGroup({
+                    key: 'assets', frame: ['blue1', 'red1', 'green1', 'yellow1'],
+                    frameQuantity: 8,
+                    gridAlign: {width: 8, height: 4, cellWidth: 64, cellHeight: 32, x: 152, y: 100}
+                });
+            } else if(currentLevel >= 2) {
+                bricks = this.physics.add.staticGroup({
+                    key: 'assets', frame: ['blue1', 'red1', 'green1', 'yellow1', 'silver1', 'purple1'],
+                    frameQuantity: 10,
+                    gridAlign: {width: 10, height: 6, cellWidth: 64, cellHeight: 32, x: 80, y: 100}
+                });
+            }
+
+            this.physics.add.collider(ball, bricks, ballHitBrick.bind(this), null, this);
+        }
+
+        function ballHitBrick(ball, brick) {
+            // Level 1, 2
+            if(currentLevel <= 2) {
+                score += 10;
+                scoreText.setText(`Points: ${score}`);
+                this.tweens.add({
+                    targets: brick,
+                    scaleX: 0,
+                    scaleY: 0,
+                    duration: 160,
+                    ease: 'Linear',
+                    onComplete: () => {
+                        brick.destroy();
+
+                        if(bricks.countActive() === 0) {
+                            showNextLevelOptions.call(this);
+                        }
+                    }
+                });
+            } else if(currentLevel === 3) {
+                // 벽돌의 충돌 횟수를 추적하는 데이터 초기화
+                if(!brick.getData('hitCount')) {
+                    brick.setData('hitCount', 0);
+                }
+                brick.setData('hitCount', brick.getData('hitCount') + 1);
+
+                // 첫 번째 충돌 (텍스쳐 변경)
+                if(brick.getData('hitCount') === 1) {
+                    const newFrame = brick.frame.name.replace('1', '2');
+                    brick.setTexture('assets', newFrame);
+                } else if (brick.getData('hitCount') === 2) {
+                    // 두 번째 충돌 (비활성화)
+                    score += 10;
+                    scoreText.setText(`Points: ${score}`);
+                    this.tweens.add({
+                        targets: brick,
+                        scaleX: 0,
+                        scaleY: 0,
+                        duration: 160,
+                        ease: 'Linear',
+                        onComplete: () => {
+                            brick.destroy();
+
+                            if(bricks.countActive() === 0) {
+                                playing = false;
+                                endGame.call(this);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        function ballHitPaddle() {
+            this.tweens.add({
+                targets: ball,
+                scaleX: 1.2,
+                scaleY: 0.8,
+                yoyo: true,
+                duration: 100,
+                repeat: 1,
+                onComplete: function() {
+                    ball.setScale(1);
+                }
+            });
+
+            let diff = 0;
+            if(ball.x < paddle.x) {
+                // ball이 paddle의 왼쪽에 있을 때
+                diff = paddle.x - ball.x;
+                ball.setVelocityX(-10 * diff);
+            } else if(ball.x > paddle.x) {
+                // ball이 paddle의 오른쪽에 있을 때
+                diff = ball.x - paddle.x;
+                ball.setVelocityX(10 * diff);
+            } else {
+                // ball이 정확히 가운데에 있을 때
+                ball.setVelocityX(2 + Math.random() * 8);
+            }
+        }
+
+        function ballLeaveScreen() {
+            lives--;
+            livesText.setText('Lives: ' + lives);
+
+            if(lives > 0) {
+                lifeLostText.visible = true;
+                veil.setVisible(true);
+                playing = false;
+                resetBall.call(this);
+                ball.setVelocity(0);
+                
+                this.input.once('pointerdown', function() {
+                    playing = true;
+                    lifeLostText.setVisible(false);
+                    veil.setVisible(false);
+                    ball.setVelocity(-75, -300);
+                });
+            } else {
+                endGame.call(this);
+            }
+        }
+
+        function showNextLevelOptions() {
+            playing = false;
+            ball.setVelocity(0);
+
+            veil.setVisible(true);
+            guideBtn.setVisible(true);
+            guideText.setVisible(true);
+            if(currentLevel === 1) {
+                guideText.setText('Next Level');
+            }
+
+            guideBtn.once('pointerup', () => {
+                veil.setVisible(false);
+                guideBtn.setVisible(false);
+                guideText.setVisible(false);
+                
+                startNextLevel.call(this);
+            });
+        }
+
+        function resetLevel() {
+            playing = true;
+
+            resetPaddle.call(this);
+            resetBall.call(this);
+
+            createBricks.call(this);
+
+            bricks.children.each(brick => {
+                const originalFrame = brick.frame.name.replace('2', '1');
+                brick.setTexture('assets', originalFrame);
+                brick.setData('hitCount', 0);
+            }, this);
+        }
+
+        function resetPaddle() {
+            paddle.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height - 50);
+        }
+
+        function resetBall() {
+            ball.setPosition(paddle.x, this.cameras.main.height - 100);
+        }
+        
+        function startNextLevel() {
+            currentLevel++;
+            levelText.setText('Level ' + currentLevel);
+            
+            resetLevel.call(this);
+            ball.setVelocity(-75, -300);
+        }
+
+        function endGame() {
+            playing = false;
+            veil.setVisible(true).setAlpha(0.9);
+            ball.setVelocity(0);
+            guideBtn.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.6).setDepth(6);
+            guideText.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.6).setText('RESTART').setDepth(7);
+
+            this.tweens.add({
+                targets: resultContainer,
+                y: 0,
+                alpha: 1,
+                duration: 1000,
+                ease: 'Sine.easeInOut',
+                onComplete: () => {
+                    if(currentLevel === 3) {
+                        // 게임 클리어, score counter
+                        let finalScore = score;
+                        let scoreObject = { value: 0 };
+
+                        if(lives > 1) {
+                            finalScore += (lives - 1) * 20;
+                        }
+
+                        this.tweens.add({
+                            targets: scoreObject,
+                            value: finalScore,
+                            duration: 2000,
+                            ease: 'Linear',
+                            onUpdate: () => {
+                                resultText2.setText(Math.round(scoreObject.value).toString());
+                            },
+                            onComplete: () => {
+                                guideBtn.setVisible(true);
+                                guideText.setVisible(true);
+                                guideBtn.once('pointerup', () => {
+                                    initializeGame.call(this);
+                                });
+                            }
+                        });
+                    } else {
+                        resultText1.setVisible(false);
+                        resultText2.setVisible(false);
+                        this.tweens.add({
+                            targets: gameOverText,
+                            y: this.cameras.main.height * 0.4,
+                            alpha: 1,
+                            duration: 1000,
+                            ease: 'Sine.easeInOut',
+                            onComplete: () => {
+                                guideBtn.setVisible(true);
+                                guideText.setVisible(true);
+                                guideBtn.once('pointerup', () => {
+                                    initializeGame.call(this);
+                                });
+                            }
+                        })
+                    }
+                }
+            });
+        }
+
+        function initializeGame() {
+            currentLevel = 1;
+            resetLevel.call(this);
+            playing = false;
+            resultContainer.setAlpha(0);
+            score = 0;
+            lives = 5;
+            scoreText.setText('Points: ' + score);
+            livesText.setText('Lives: ' + lives);
+            levelText.setText('Level ' + currentLevel);
+            resultText1.setVisible(true);
+            resultText2.setText('0').setVisible(true);
+            guideBtn.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5).setDepth(2);
+            guideText.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5).setText('START').setDepth(3);
+            veil.setAlpha(0.38);
+        }
+    </script>
+</body>
+</html>
